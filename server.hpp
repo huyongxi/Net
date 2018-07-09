@@ -3,33 +3,91 @@
 
 #include <iostream>
 #include <sys/socket.h>
-#include <stdlib.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <string.h>
 
+class SockAddr {
+public:
+    SockAddr(const char* ip, unsigned short port,int family = AF_INET):
+        _ip(ip),_port(port)
+    {
+        addr = new sockaddr_in();
+        bzero(addr,sizeof(sockaddr_in));
+        addr->sin_family = family;
+        addr->sin_port = htons(port);
+        addr->sin_addr.s_addr = inet_addr(ip);
+        //inet_pton(family,ip,&addr->sin_addr);
+    }
+
+    SockAddr(const sockaddr_in& saddr){
+        addr = new sockaddr_in(saddr);
+        _ip = inet_ntoa(saddr.sin_addr);
+        _port  = ntohs(saddr.sin_port);
+    }
+
+    ~SockAddr(){
+        delete addr;
+    }
+
+    const char* ip(){
+        return _ip;
+    }
+    unsigned short port(){
+        return _port;
+    }
+    const sockaddr_in& get_sockaddr_in(){
+        return *addr;
+    }
+
+    friend std::ostream& operator<<(std::ostream& out, const SockAddr& addr);
+
+private:
+    sockaddr_in* addr;
+    const char* _ip;
+    unsigned short _port;
+};
+
+std::ostream& operator<<(std::ostream& out, const SockAddr& addr){
+    return out << addr._ip << ":" << addr._port << std::endl;
+}
 
 class Socket {
 public:
     Socket(int family = AF_INET,int type = SOCK_STREAM,int protocol = 0){
-        fd = socket(family,type,protocol);
-        if(fd < 0){
+        _fd = socket(family,type,protocol);
+        if(_fd < 0){
             std::cout << "create socket failed!" << std::endl;
+            valid = true;
         }else{
             std::cout << "create socket success" << std::endl;
         }
     }
 
-    size_t send(void* buf ,size_t len){
+    size_t send(void* buf ,size_t len);
+    size_t recv(void* buf,size_t len);
 
+    bool bind(const char* ip);
+    bool connect(const char* ip);
+    bool listen(int num);
+    Socket accept();
+
+    int fd(){
+        return _fd;
     }
 
-    size_t recv(void* buf,size_t len){
-        
+    operator bool() const {
+        return valid;
     }
 
     ~Socket(){
-        close(fd);
+        close(_fd);
     }
 private:
-    int fd = 0;
+    int _fd = 0;
+    bool valid = false;
 };
 
 #endif
