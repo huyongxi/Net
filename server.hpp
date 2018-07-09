@@ -67,9 +67,9 @@ public:
         _fd = socket(family,type,protocol);
         if(_fd < 0){
             std::cout << "create socket failed!" << std::endl;
-            valid = true;
         }else{
             std::cout << "create socket success" << std::endl;
+			valid = true;
         }
     }
 
@@ -93,11 +93,7 @@ public:
         close(_fd);
     }
 private:
-#if (defined(WIN32) || defined(WIN64))
-	SOCKET _fd;
-#else
     int _fd = 0;
-#endif
     bool valid = false;
 };
 
