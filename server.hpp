@@ -2,13 +2,22 @@
 #define __SERVER_H__
 
 #include <iostream>
+#include <string.h>
+#if (defined(WIN32) || defined(WIN64))
+#include <WinSock2.h>
+#include <Windows.h>
+#define close closesocket;
+#define bzero(dst,len) memset(dst, 0, len);
+#pragma comment(lib,"WS2_32")
+#else
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <string.h>
+#endif
 
+typedef sockaddr SA;
 class SockAddr {
 public:
     SockAddr(const char* ip, unsigned short port,int family = AF_INET):
@@ -50,9 +59,7 @@ private:
     unsigned short _port;
 };
 
-std::ostream& operator<<(std::ostream& out, const SockAddr& addr){
-    return out << addr._ip << ":" << addr._port << std::endl;
-}
+
 
 class Socket {
 public:
@@ -70,7 +77,7 @@ public:
     size_t recv(void* buf,size_t len);
 
     bool bind(const char* ip);
-    bool connect(const char* ip);
+	bool connect(const char* ip, unsigned short port);
     bool listen(int num);
     Socket accept();
 
@@ -86,7 +93,11 @@ public:
         close(_fd);
     }
 private:
+#if (defined(WIN32) || defined(WIN64))
+	SOCKET _fd;
+#else
     int _fd = 0;
+#endif
     bool valid = false;
 };
 
