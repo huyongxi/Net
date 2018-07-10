@@ -144,7 +144,7 @@ public:
     Server(const char* ip ,unsigned short port ,int thread_num = 4):
     _tnum(thread_num)
     {
-        if(sock.bind(ip, port) && sock.listen()){
+        if(listen_sock.bind(ip, port) && listen_sock.listen()){
             valid = true;
         }
     }
@@ -159,10 +159,17 @@ public:
             thrs.push_back(temp);
             thr_map[temp->get_id()] = temp;
         }
+		while (!stop) {
+			Socket s = listen_sock.accept();
+			if (s) {
+				conn_sockets.push_back()
+			}
+		}
+
     }
     void run(){
         cout << "start thread id = " << this_thread::get_id() << endl;
-        cout << *sock.get_sockaddr() << endl;
+        cout << *listen_sock.get_sockaddr() << endl;
         process("Hello World", 11);
     }
 
@@ -171,11 +178,13 @@ public:
     }
 
 private:
+	bool stop = false;
     bool valid = false;
     int _tnum;
     list<thread*> thrs;
     unordered_map<thread::id, thread*> thr_map;
-    Socket sock;
+    Socket listen_sock;
+	list<Socket> conn_sockets;
 };
 
 #endif
