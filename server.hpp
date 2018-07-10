@@ -6,7 +6,9 @@
 #include <thread>
 #include <list>
 #include <queue>
+#include <mutex>
 #include <unordered_map>
+#include  <vector>
 #if (defined(WIN32) || defined(WIN64))
 #include <WinSock2.h>
 #include <Windows.h>
@@ -77,7 +79,7 @@ private:
 
 class Socket {
 public:
-    Socket(int family = AF_INET,int type = SOCK_STREAM,int protocol = 0) {
+    Socket(int family, int type, int protocol) {
         _fd = socket(family,type,protocol);
         if(_fd < 0){
             std::cout << "create socket failed!" << std::endl;
@@ -86,7 +88,7 @@ public:
 			valid = true;
         }
     }
-    Socket(const char* empty){}
+    Socket(){}
 
     Socket(const Socket& s){
         _fd = s._fd;
@@ -114,6 +116,10 @@ public:
     bool listen(int backlog = 1024);
     Socket accept();
 
+    int close() const{
+        return ::close(_fd);
+    }
+
     int fd() const{
         return _fd;
     }
@@ -127,7 +133,6 @@ public:
     }
 
     ~Socket(){
-        close(_fd);
         if(addr){
             delete addr;
         }
@@ -142,34 +147,63 @@ private:
 class Server{
 public:
     Server(const char* ip ,unsigned short port ,int thread_num = 4):
-    _tnum(thread_num)
+    _tnum(thread_num), listen_sock(AF_INET, SOCK_STREAM, 0)
     {
         if(listen_sock.bind(ip, port) && listen_sock.listen()){
             valid = true;
         }
     }
 
-    virtual void process(char* buff, size_t len){
+    virtual void process(const char* buff, size_t len){
         cout << buff << endl;
     }
 
     void start(){
         for (int i = 0; i < _tnum; ++i){
-            thread* temp = new thread(&Server::run,this);
-            thrs.push_back(temp);
-            thr_map[temp->get_id()] = temp;
+            thread t(&Server::run, this, i);
+            thread_list.push_back(move(t));
+            mutexs.push_back(new mutex());
+            queues.push_back(new queue<Socket*>());
         }
 		while (!stop) {
 			Socket s = listen_sock.accept();
 			if (s) {
-				conn_sockets.push_back()
+				conn_sockets.push_back(s);
+                connsock_map[s.fd()] = --conn_sockets.end();
+                int index = s.fd() % _tnum;
+                mutexs[index]->lock();
+                queues[index]->push( &(*connsock_map[s.fd()]) );
+                mutexs[index]->unlock();
+                cout << s.fd() << " add queue" << endl;
 			}
+            
 		}
 
     }
-    void run(){
+    void run(int index){
         cout << "start thread id = " << this_thread::get_id() << endl;
-        cout << *listen_sock.get_sockaddr() << endl;
+        list<Socket*> new_sock;
+        queue<Socket*>* q = queues[index];
+        while(true) {
+             mutexs[index]->lock();
+             while(!q->empty()){
+                 new_sock.push_back(q->front());
+                 q->pop();
+             }
+             mutexs[index]->unlock();
+             if(new_sock.empty()){
+                 //cout << "no new socket to process sleep 1s" <<endl;
+                 sleep(1);
+                 continue;
+             }
+             cout << this_thread::get_id() << " process: ";
+             for(auto i : new_sock){
+                 cout <<i->fd() << " ";
+                 i->writen("Hello",6);
+             }
+             cout << endl;
+             new_sock.clear();
+        }
         process("Hello World", 11);
     }
 
@@ -181,10 +215,12 @@ private:
 	bool stop = false;
     bool valid = false;
     int _tnum;
-    list<thread*> thrs;
-    unordered_map<thread::id, thread*> thr_map;
+    list<thread> thread_list;
     Socket listen_sock;
 	list<Socket> conn_sockets;
+    unordered_map<int, list<Socket>::iterator> connsock_map;
+    vector<mutex*> mutexs;
+    vector<queue<Socket*>*> queues;
 };
 
 #endif

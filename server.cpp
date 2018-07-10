@@ -45,7 +45,7 @@ bool Socket::listen(int backlog){
 Socket Socket::accept(){
 	sockaddr_in client_adddr;
 	socklen_t len = sizeof(client_adddr);
-	Socket sock("");
+	Socket sock;
 	int cfd = ::accept(_fd, (SA*)&client_adddr, &len);
 	if (cfd < 0){
 		perror("");
