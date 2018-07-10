@@ -3,6 +3,10 @@
 
 #include <iostream>
 #include <string.h>
+#include <thread>
+#include <list>
+#include <queue>
+#include <unordered_map>
 #if (defined(WIN32) || defined(WIN64))
 #include <WinSock2.h>
 #include <Windows.h>
@@ -18,7 +22,7 @@
 #include <errno.h>
 #include <stdio.h>
 #endif
-
+using namespace std;
 typedef sockaddr SA;
 class SockAddr {
 public:
@@ -132,6 +136,46 @@ private:
     int _fd = 0;
     bool valid = false;
     SockAddr* addr = nullptr;
+};
+
+
+class Server{
+public:
+    Server(const char* ip ,unsigned short port ,int thread_num = 4):
+    _tnum(thread_num)
+    {
+        if(sock.bind(ip, port) && sock.listen()){
+            valid = true;
+        }
+    }
+
+    virtual void process(char* buff, size_t len){
+        cout << buff << endl;
+    }
+
+    void start(){
+        for (int i = 0; i < _tnum; ++i){
+            thread* temp = new thread(&Server::run,this);
+            thrs.push_back(temp);
+            thr_map[temp->get_id()] = temp;
+        }
+    }
+    void run(){
+        cout << "start thread id = " << this_thread::get_id() << endl;
+        cout << *sock.get_sockaddr() << endl;
+        process("Hello World", 11);
+    }
+
+    operator bool() const{
+        return valid;
+    }
+
+private:
+    bool valid = false;
+    int _tnum;
+    list<thread*> thrs;
+    unordered_map<thread::id, thread*> thr_map;
+    Socket sock;
 };
 
 #endif
