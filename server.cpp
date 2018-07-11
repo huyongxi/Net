@@ -48,7 +48,7 @@ Socket Socket::accept(){
 	Socket sock;
 	int cfd = ::accept(_fd, (SA*)&client_adddr, &len);
 	if (cfd < 0){
-		perror("");
+		perror(__func__);
 	}else{
 		sock.addr = new SockAddr(&client_adddr);
 		sock.valid = true;
@@ -65,6 +65,9 @@ ssize_t Socket::readn(void* buff, size_t nbytes){
 
 	while(nleft > 0){
 		if( (nread = read(_fd,ptr,nleft)) < 0 ){
+			if(errno == EAGAIN){
+				break;
+			}
 			if(errno == EINTR){
 				nread = 0;			//interrupt read
 			}else{
@@ -72,6 +75,7 @@ ssize_t Socket::readn(void* buff, size_t nbytes){
 			}
 
 		}else if(nread == 0){
+			//valid = false;
 			break;					//EOF
 		}
 

@@ -8,7 +8,8 @@
 #include <queue>
 #include <mutex>
 #include <unordered_map>
-#include  <vector>
+#include <vector>
+
 #if (defined(WIN32) || defined(WIN64))
 #include <WinSock2.h>
 #include <Windows.h>
@@ -23,7 +24,11 @@
 #include <netinet/in.h>
 #include <errno.h>
 #include <stdio.h>
+#include <sys/epoll.h>
+#include <signal.h>
+#include <fcntl.h>
 #endif
+const int EPOLLSIZE = 5000;
 using namespace std;
 typedef sockaddr SA;
 class SockAddr {
@@ -154,12 +159,24 @@ public:
         }
     }
 
-    virtual void process(const char* buff, size_t len){
+    virtual void process(Socket& s, char* buff, size_t len){
+        bzero(buff,1024);
+        size_t rlen = s.readn(buff, len);
+        if(rlen == 0){
+            return;
+        }
         cout << buff << endl;
+        s.writen("Hello\n", 6);
     }
 
     void start(){
         for (int i = 0; i < _tnum; ++i){
+            int epfd = epoll_create(EPOLLSIZE);
+            if(epfd < 0){
+                perror(__func__);
+                return ;
+            }
+            epollfds.push_back(epfd);
             thread t(&Server::run, this, i);
             thread_list.push_back(move(t));
             mutexs.push_back(new mutex());
@@ -169,10 +186,11 @@ public:
 			Socket s = listen_sock.accept();
 			if (s) {
 				conn_sockets.push_back(s);
-                connsock_map[s.fd()] = --conn_sockets.end();
+                auto tmp = --conn_sockets.end();
+                connsock_map[s.fd()] = tmp;
                 int index = s.fd() % _tnum;
                 mutexs[index]->lock();
-                queues[index]->push( &(*connsock_map[s.fd()]) );
+                queues[index]->push( &(*tmp) );
                 mutexs[index]->unlock();
                 cout << s.fd() << " add queue" << endl;
 			}
@@ -184,37 +202,89 @@ public:
         cout << "start thread id = " << this_thread::get_id() << endl;
         list<Socket*> new_sock;
         queue<Socket*>* q = queues[index];
+        epoll_event events[EPOLLSIZE/3];
+        int epollfd = epollfds[index];
+        mutex* queue_mutex = mutexs[index];
+        char buff[1024];
+
         while(true) {
-             mutexs[index]->lock();
+             queue_mutex->lock();
              while(!q->empty()){
                  new_sock.push_back(q->front());
                  q->pop();
              }
-             mutexs[index]->unlock();
-             if(new_sock.empty()){
-                 //cout << "no new socket to process sleep 1s" <<endl;
-                 sleep(1);
-                 continue;
-             }
-             cout << this_thread::get_id() << " process: ";
+             queue_mutex->unlock();
+
              for(auto i : new_sock){
-                 cout <<i->fd() << " ";
-                 i->writen("Hello",6);
+                 fcntl(i->fd(), F_SETFL, O_NONBLOCK); 
+                 add_event(epollfd, i->fd(), EPOLLIN | EPOLLET | EPOLLRDHUP);
+                 cout << this_thread::get_id() << " add event fd = " << i->fd() << endl;
              }
-             cout << endl;
              new_sock.clear();
+
+             int ret = epoll_wait(epollfd, events, EPOLLSIZE/3, 5);
+             for(int i = 0; i < ret; ++i){
+                int rfd = events[i].data.fd;
+                Socket& rsock = *connsock_map[rfd];
+                if(events[i].events & EPOLLIN){
+                    process(rsock, buff, 1024);
+                }
+                if(events[i].events & (EPOLLHUP | EPOLLRDHUP)){
+                    delete_event(epollfd, rfd, EPOLLIN | EPOLLET);
+                    cout << *rsock.get_sockaddr() << " is disconnect" << endl;
+                    rsock.close();
+                    conn_sockets.erase(connsock_map[rfd]);
+                    connsock_map.erase(rfd);
+                }
+             }
+
         }
-        process("Hello World", 11);
+    }
+
+    void add_event(int epollfd, int fd, int state){
+        epoll_event ev;
+        ev.events = state;
+        ev.data.fd = fd;
+        epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev);
+    }
+
+    void modify_event(int epollfd,int fd,int state){     
+        epoll_event ev;
+        ev.events = state;
+        ev.data.fd = fd;
+        epoll_ctl(epollfd,EPOLL_CTL_MOD,fd,&ev);
+    }
+
+    void delete_event(int epollfd,int fd,int state) {
+        epoll_event ev;
+        ev.events = state;
+        ev.data.fd = fd;
+        epoll_ctl(epollfd,EPOLL_CTL_DEL,fd,&ev);
     }
 
     operator bool() const{
         return valid;
+    }
+    ~Server(){
+        for(auto& s : conn_sockets){
+            s.close();
+        }
+        for(auto fd : epollfds){
+            ::close(fd);
+        }
+        for(auto m : mutexs){
+            delete m;
+        }
+        for(auto q : queues){
+            delete q;
+        }
     }
 
 private:
 	bool stop = false;
     bool valid = false;
     int _tnum;
+    vector<int> epollfds;
     list<thread> thread_list;
     Socket listen_sock;
 	list<Socket> conn_sockets;
