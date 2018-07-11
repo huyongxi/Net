@@ -7,7 +7,7 @@ int main(void) {
 	if (sigaction(SIGPIPE, &act, NULL) == 0){
 		cout << "SIGPIPE ignore" <<endl;
 	}
-	Server s("192.168.85.128",8000,4);
+	Server s("127.0.0.1",8000,4);
 	s.start();
 	return 0;
 }

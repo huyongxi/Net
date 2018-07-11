@@ -29,6 +29,8 @@
 #include <fcntl.h>
 #endif
 const int EPOLLSIZE = 5000;
+const int sendBuffSize = 4*1024*8;
+const int recvBuffSize = 4*1024*8;
 using namespace std;
 typedef sockaddr SA;
 class SockAddr {
@@ -91,23 +93,57 @@ public:
         }else{
             std::cout << "create socket success" << std::endl;
 			valid = true;
+            sendbuff = new char[sendBuffSize];
+            recvbuff = new char[recvBuffSize];
         }
     }
     Socket(){}
-
+    /*
     Socket(const Socket& s){
         _fd = s._fd;
         valid = s.valid;
         addr = new SockAddr(s.get_sockaddr()->get_sockaddr_in());
+        sendbuff = new char[sendBuffSize];
+        recvbuff = new char[recvBuffSize];
+        memcpy(sendbuff, s.sendbuff, sendBuffSize);
+        memcpy(recvbuff, s.recvbuff, recvBuffSize);
+     }*/
+    Socket(const Socket&) = delete;
+    Socket(Socket&& s){
+        _fd = s._fd;
+        valid = s.valid;
+        addr = s.addr;
+        recvbuff = s.recvbuff;
+        sendbuff = s.sendbuff;
+        s.addr = nullptr;
+        s.recvbuff = s.sendbuff = nullptr;
+
     }
+    /*
     Socket& operator=(const Socket& s){
+         if(this != &s){
+             _fd = s._fd;
+             valid = s.valid;
+             release_memory();
+             addr = new SockAddr(s.get_sockaddr()->get_sockaddr_in());
+             sendbuff = new char[sendBuffSize];
+             recvbuff = new char[recvBuffSize];
+             memcpy(sendbuff, s.sendbuff, sendBuffSize);
+             memcpy(recvbuff, s.recvbuff, recvBuffSize);
+         }
+         return *this;
+     }*/
+    Socket& operator=(const Socket&) = delete;
+    Socket& operator=(Socket&& s){
         if(this != &s){
             _fd = s._fd;
             valid = s.valid;
-            if(addr){
-                delete addr;
-            }
-            addr = new SockAddr(s.get_sockaddr()->get_sockaddr_in());
+            release_memory();
+            addr = s.addr;
+            recvbuff = s.recvbuff;
+            sendbuff = s.sendbuff;
+            s.addr = nullptr;
+            s.recvbuff = s.sendbuff = nullptr;
         }
         return *this;
     }
@@ -137,15 +173,26 @@ public:
         return valid;
     }
 
-    ~Socket(){
+    void release_memory(){
         if(addr){
             delete addr;
         }
+        if(recvbuff){
+            delete[] recvbuff;
+        }
+        if(sendbuff){
+            delete[] sendbuff;
+        }
+    }
+    ~Socket(){
+        release_memory();
     }
 private:
     int _fd = 0;
     bool valid = false;
     SockAddr* addr = nullptr;
+    char* recvbuff = nullptr;
+    char* sendbuff = nullptr;
 };
 
 
@@ -185,7 +232,7 @@ public:
 		while (!stop) {
 			Socket s = listen_sock.accept();
 			if (s) {
-				conn_sockets.push_back(s);
+				conn_sockets.push_back(move(s));
                 auto tmp = --conn_sockets.end();
                 connsock_map[s.fd()] = tmp;
                 int index = s.fd() % _tnum;
@@ -194,7 +241,6 @@ public:
                 mutexs[index]->unlock();
                 cout << s.fd() << " add queue" << endl;
 			}
-            
 		}
 
     }
@@ -224,17 +270,17 @@ public:
 
              int ret = epoll_wait(epollfd, events, EPOLLSIZE/3, 5);
              for(int i = 0; i < ret; ++i){
-                int rfd = events[i].data.fd;
-                Socket& rsock = *connsock_map[rfd];
+                int cfd = events[i].data.fd;
+                Socket& sock = *connsock_map[cfd];
                 if(events[i].events & EPOLLIN){
-                    process(rsock, buff, 1024);
+                    process(sock, buff, 1024);
                 }
                 if(events[i].events & (EPOLLHUP | EPOLLRDHUP)){
-                    delete_event(epollfd, rfd, EPOLLIN | EPOLLET);
-                    cout << *rsock.get_sockaddr() << " is disconnect" << endl;
-                    rsock.close();
-                    conn_sockets.erase(connsock_map[rfd]);
-                    connsock_map.erase(rfd);
+                    delete_event(epollfd, cfd, EPOLLIN | EPOLLET);
+                    cout << *sock.get_sockaddr() << " is disconnect" << endl;
+                    sock.close();
+                    conn_sockets.erase(connsock_map[cfd]);
+                    connsock_map.erase(cfd);
                 }
              }
 

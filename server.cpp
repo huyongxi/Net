@@ -55,7 +55,7 @@ Socket Socket::accept(){
 		sock._fd = cfd;
 		std::cout << *sock.addr << " is connected" << std::endl;
 	}
-	return sock;
+	return move(sock);
 }
 
 ssize_t Socket::readn(void* buff, size_t nbytes){
