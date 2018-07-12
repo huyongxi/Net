@@ -103,7 +103,10 @@ public:
         }
     }
 
-    Socket() {}
+    Socket() {
+        sendbuff.resize(recvBuffSize);
+        recvbuff.resize(sendBuffSize);
+    }
     Socket(const Socket&) = delete;
     Socket(Socket&& s){
         _fd = s._fd;
@@ -173,10 +176,10 @@ private:
     int _epfd = 0;
     bool valid = false;
     SockAddr* addr = nullptr;
-    string recvbuff;
-    string sendbuff;
     int rpos = 0;
     int wpos = 0;
+    string recvbuff;
+    string sendbuff;
 };
 
 
@@ -196,7 +199,8 @@ public:
         if(len == 0){
             return;
         }
-        len = s.writen("Hello\n", 6);
+        char* msg = new char[1024*8*4];
+        len = s.writen(msg,1024*8*4);
         cout << "write size = " <<  len << endl;
     }
 
@@ -208,10 +212,10 @@ public:
                 return ;
             }
             epollfds.push_back(epfd);
-            thread t(&Server::run, this, i);
-            thread_list.push_back(move(t));
             mutexs.push_back(new mutex());
             queues.push_back(new queue<Socket*>());
+            thread t(&Server::run, this, i);
+            thread_list.push_back(move(t));
         }
 		while (!stop) {
 			Socket s = listen_sock.accept();

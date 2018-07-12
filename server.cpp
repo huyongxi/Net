@@ -66,15 +66,12 @@ ssize_t Socket::readn(){
 
 repeate:
 	while(nleft > 0){
-		cout << "rpos = " << rpos << endl;
 		int curr_size = recvbuff.size();
 		if(rpos + nleft > curr_size){
 			recvbuff.resize(curr_size * 2);
 			ptr = &recvbuff[rpos];
 		}
-		cout << "rpos = " << rpos << endl;
 		if( (nread = read(_fd, ptr, nleft)) < 0 ){
-			cout << "nread = " << nread << endl;
 			if(errno == EAGAIN){		//nothing to read
 				break;
 			}
@@ -87,13 +84,10 @@ repeate:
 		}else if(nread == 0){
 			break;					//EOF  client disconnect
 		}
-		cout << "nread = " << nread << endl;
 		nleft -= nread;
-		cout << "rpos = " << rpos << endl;
 		rpos += nread;
 		ptr += nread;
 		sum += nread;
-		cout << "rpos = " << rpos << endl;
 	}
 	if(nleft == 0){
 		nleft = 1024;
@@ -149,7 +143,6 @@ ssize_t Socket::writen(const void* buff, size_t nbytes){
 
 
 void Socket::parsePacket(){
-	cout << "rpos = " << rpos << endl;
 	recvbuff[rpos] = 0;
 	cout << &recvbuff[0] << endl;
 	rpos = 0;
