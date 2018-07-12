@@ -9,7 +9,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <vector>
-
+#include <tuple>
 #if (defined(WIN32) || defined(WIN64))
 #include <WinSock2.h>
 #include <Windows.h>
@@ -82,7 +82,12 @@ private:
     unsigned short _port;
 };
 
+struct Packet {
+    unsigned short len;
+    char* data;
+};
 
+class Server;
 
 class Socket {
 public:
@@ -93,63 +98,46 @@ public:
         }else{
             std::cout << "create socket success" << std::endl;
 			valid = true;
-            sendbuff = new char[sendBuffSize];
-            recvbuff = new char[recvBuffSize];
+            sendbuff.resize(recvBuffSize);
+            recvbuff.resize(sendBuffSize);
         }
     }
-    Socket(){}
-    /*
-    Socket(const Socket& s){
-        _fd = s._fd;
-        valid = s.valid;
-        addr = new SockAddr(s.get_sockaddr()->get_sockaddr_in());
-        sendbuff = new char[sendBuffSize];
-        recvbuff = new char[recvBuffSize];
-        memcpy(sendbuff, s.sendbuff, sendBuffSize);
-        memcpy(recvbuff, s.recvbuff, recvBuffSize);
-     }*/
+
+    Socket() {}
     Socket(const Socket&) = delete;
     Socket(Socket&& s){
         _fd = s._fd;
+        _epfd = s._epfd;
         valid = s.valid;
         addr = s.addr;
-        recvbuff = s.recvbuff;
-        sendbuff = s.sendbuff;
+        recvbuff = move(s.recvbuff);
+        sendbuff = move(s.sendbuff);
+        rpos = s.rpos;
+        wpos = s.wpos;
         s.addr = nullptr;
-        s.recvbuff = s.sendbuff = nullptr;
-
     }
-    /*
-    Socket& operator=(const Socket& s){
-         if(this != &s){
-             _fd = s._fd;
-             valid = s.valid;
-             release_memory();
-             addr = new SockAddr(s.get_sockaddr()->get_sockaddr_in());
-             sendbuff = new char[sendBuffSize];
-             recvbuff = new char[recvBuffSize];
-             memcpy(sendbuff, s.sendbuff, sendBuffSize);
-             memcpy(recvbuff, s.recvbuff, recvBuffSize);
-         }
-         return *this;
-     }*/
+
     Socket& operator=(const Socket&) = delete;
     Socket& operator=(Socket&& s){
         if(this != &s){
             _fd = s._fd;
+            _epfd = s._epfd;
             valid = s.valid;
-            release_memory();
+            if(addr){
+                delete addr;
+            }
             addr = s.addr;
-            recvbuff = s.recvbuff;
-            sendbuff = s.sendbuff;
+            recvbuff = move(s.recvbuff);
+            sendbuff = move(s.sendbuff);
+            rpos = s.rpos;
+            wpos = s.wpos;
             s.addr = nullptr;
-            s.recvbuff = s.sendbuff = nullptr;
         }
         return *this;
     }
 
-   
-    ssize_t readn(void* buff, size_t nbytes);
+    void parsePacket();
+    ssize_t readn();
     ssize_t writen(const void* buff, size_t nbytes);
 
     bool bind(const char* ip, unsigned short port);
@@ -157,42 +145,38 @@ public:
     bool listen(int backlog = 1024);
     Socket accept();
 
-    int close() const{
-        return ::close(_fd);
+    int close() const{ return ::close(_fd); }
+
+    int fd() const{ return _fd; }
+
+    SockAddr* get_sockaddr() const{ return addr; }
+
+    operator bool() const { return valid; }
+
+    void set_epollfd(int epfd){_epfd = epfd; }
+
+    tuple<char*, int> get_sendbuff(){
+        char* tmp_buf = new char[wpos];
+        int tmp_wpos = wpos;
+        wpos = 0;
+        memcpy(tmp_buf, &sendbuff[0], wpos);
+        return make_tuple(tmp_buf, tmp_wpos);
     }
 
-    int fd() const{
-        return _fd;
-    }
-
-    SockAddr* get_sockaddr() const{
-        return addr;
-    }
-
-    operator bool() const {
-        return valid;
-    }
-
-    void release_memory(){
+    ~Socket(){
         if(addr){
             delete addr;
         }
-        if(recvbuff){
-            delete[] recvbuff;
-        }
-        if(sendbuff){
-            delete[] sendbuff;
-        }
-    }
-    ~Socket(){
-        release_memory();
     }
 private:
     int _fd = 0;
+    int _epfd = 0;
     bool valid = false;
     SockAddr* addr = nullptr;
-    char* recvbuff = nullptr;
-    char* sendbuff = nullptr;
+    string recvbuff;
+    string sendbuff;
+    int rpos = 0;
+    int wpos = 0;
 };
 
 
@@ -206,14 +190,14 @@ public:
         }
     }
 
-    virtual void process(Socket& s, char* buff, size_t len){
-        bzero(buff,1024);
-        size_t rlen = s.readn(buff, len);
-        if(rlen == 0){
+    virtual void onRecv(Socket& s){
+        size_t len = s.readn();
+        cout << "read size= " << len << endl;
+        if(len == 0){
             return;
         }
-        cout << buff << endl;
-        s.writen("Hello\n", 6);
+        len = s.writen("Hello\n", 6);
+        cout << "write size = " <<  len << endl;
     }
 
     void start(){
@@ -251,7 +235,6 @@ public:
         epoll_event events[EPOLLSIZE/3];
         int epollfd = epollfds[index];
         mutex* queue_mutex = mutexs[index];
-        char buff[1024];
 
         while(true) {
              queue_mutex->lock();
@@ -263,6 +246,7 @@ public:
 
              for(auto i : new_sock){
                  fcntl(i->fd(), F_SETFL, O_NONBLOCK); 
+                 i->set_epollfd(epollfd);
                  add_event(epollfd, i->fd(), EPOLLIN | EPOLLET | EPOLLRDHUP);
                  cout << this_thread::get_id() << " add event fd = " << i->fd() << endl;
              }
@@ -273,7 +257,15 @@ public:
                 int cfd = events[i].data.fd;
                 Socket& sock = *connsock_map[cfd];
                 if(events[i].events & EPOLLIN){
-                    process(sock, buff, 1024);
+                    onRecv(sock);
+                }
+                if(events[i].events & EPOLLOUT){
+                    delete_event(epollfd, cfd, EPOLLOUT | EPOLLET);
+                    const char* buf;
+                    int len;
+                    tie(buf, len) = sock.get_sendbuff();
+                    sock.writen(buf, len);
+                    delete[] buf;
                 }
                 if(events[i].events & (EPOLLHUP | EPOLLRDHUP)){
                     delete_event(epollfd, cfd, EPOLLIN | EPOLLET);
@@ -287,21 +279,21 @@ public:
         }
     }
 
-    void add_event(int epollfd, int fd, int state){
+    static void add_event(int epollfd, int fd, int state){
         epoll_event ev;
         ev.events = state;
         ev.data.fd = fd;
         epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev);
     }
 
-    void modify_event(int epollfd,int fd,int state){     
+    static void modify_event(int epollfd,int fd,int state){     
         epoll_event ev;
         ev.events = state;
         ev.data.fd = fd;
         epoll_ctl(epollfd,EPOLL_CTL_MOD,fd,&ev);
     }
 
-    void delete_event(int epollfd,int fd,int state) {
+    static void delete_event(int epollfd,int fd,int state) {
         epoll_event ev;
         ev.events = state;
         ev.data.fd = fd;
