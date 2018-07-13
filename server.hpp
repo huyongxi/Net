@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 #include <tuple>
+#include <atomic>
 #if (defined(WIN32) || defined(WIN64))
 #include <WinSock2.h>
 #include <Windows.h>
@@ -149,6 +150,7 @@ public:
     Socket accept();
 
     int close() const{ return ::close(_fd); }
+    int shutdown(int how) const{ return ::shutdown(_fd, how); }
 
     int fd() const{ return _fd; }
 
@@ -158,19 +160,12 @@ public:
 
     void set_epollfd(int epfd){_epfd = epfd; }
 
-    tuple<char*, int> get_sendbuff(){
-        char* tmp_buf = new char[wpos];
-        int tmp_wpos = wpos;
-        wpos = 0;
-        memcpy(tmp_buf, &sendbuff[0], wpos);
-        return make_tuple(tmp_buf, tmp_wpos);
-    }
-
     ~Socket(){
         if(addr){
             delete addr;
         }
     }
+
 private:
     int _fd = 0;
     int _epfd = 0;
@@ -185,8 +180,10 @@ private:
 
 class Server{
 public:
+    atomic<bool> stop;
+
     Server(const char* ip ,unsigned short port ,int thread_num = 4):
-    _tnum(thread_num), listen_sock(AF_INET, SOCK_STREAM, 0)
+    _tnum(thread_num), listen_sock(AF_INET, SOCK_STREAM, 0), stop(false)
     {
         if(listen_sock.bind(ip, port) && listen_sock.listen()){
             valid = true;
@@ -195,7 +192,6 @@ public:
 
     virtual void onRecv(Socket& s){
         size_t len = s.readn();
-        cout << "read size= " << len << endl;
     }
 
     void start(){
@@ -211,7 +207,7 @@ public:
             thread t(&Server::run, this, i);
             thread_list.push_back(move(t));
         }
-		while (!stop) {
+		while (!stop && valid) {
 			Socket s = listen_sock.accept();
 			if (s) {
 				conn_sockets.push_back(move(s));
@@ -224,17 +220,22 @@ public:
                 cout << s.fd() << " add queue" << endl;
 			}
 		}
+        stop = true;
+        for(auto& t : thread_list){
+            cout <<"stop thread id = " << t.get_id() << endl;
+            t.join();
+        }
 
     }
     void run(int index){
         cout << "start thread id = " << this_thread::get_id() << endl;
         list<Socket*> new_sock;
         queue<Socket*>* q = queues[index];
-        epoll_event events[EPOLLSIZE/3];
+        epoll_event events[EPOLLSIZE];
         int epollfd = epollfds[index];
         mutex* queue_mutex = mutexs[index];
 
-        while(true) {
+        while(!stop) {
              queue_mutex->lock();
              while(!q->empty()){
                  new_sock.push_back(q->front());
@@ -259,11 +260,7 @@ public:
                 }
                 if(events[i].events & EPOLLOUT){
                     delete_event(epollfd, cfd, EPOLLOUT | EPOLLET);
-                    const char* buf;
-                    int len;
-                    tie(buf, len) = sock.get_sendbuff();
-                    sock.writen(buf, len);
-                    delete[] buf;
+                    sock.writen("", 0);
                 }
                 if(events[i].events & (EPOLLHUP | EPOLLRDHUP)){
                     delete_event(epollfd, cfd, EPOLLIN | EPOLLET);
@@ -315,9 +312,8 @@ public:
             delete q;
         }
     }
-
+    
 private:
-	bool stop = false;
     bool valid = false;
     int _tnum;
     vector<int> epollfds;

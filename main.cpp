@@ -7,7 +7,14 @@ int main(void) {
 	if (sigaction(SIGPIPE, &act, NULL) == 0){
 		cout << "SIGPIPE ignore" <<endl;
 	}
-	Server s("127.0.0.1",8000,4);
-	s.start();
+	Server s("192.168.85.128",8000,4);
+	thread net_thread(&Server::start, &s);
+	string cmd = "";
+	while( cmd != "q"){
+		cin >> cmd;
+	}
+	s.stop = true;
+	net_thread.join();
+
 	return 0;
 }

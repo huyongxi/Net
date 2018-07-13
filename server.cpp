@@ -100,28 +100,20 @@ repeate:
 }
 
 ssize_t Socket::writen(const void* buff, size_t nbytes){
-	size_t nleft = nbytes;
 	ssize_t nwrite;
-	const char* ptr = (char*)buff;
-	char* temp_buff = nullptr;
-	if(wpos != 0){			//sendbuff not empty
-		cout << "wpos = " << wpos << endl;
-		temp_buff = new char[wpos + nbytes];
-		memcpy(temp_buff, &recvbuff[0], wpos);
-		memcpy(temp_buff+wpos, buff, nbytes);
-		wpos = 0;
-		ptr = temp_buff;
+	int curr_size = sendbuff.size();
+	if(wpos + nbytes > curr_size){
+		sendbuff.resize(wpos + nbytes);
 	}
+	memcpy(&sendbuff[wpos], buff, nbytes);
+	wpos += nbytes;
+	size_t nleft = wpos;
+	const char* ptr = &sendbuff[0];
+
 	while( nleft > 0){
 		if( (nwrite = write(_fd,ptr,nleft)) <= 0 ){
 			cout << "nwrite = " << nwrite << endl;
 			if(nwrite < 0 && errno == EAGAIN){      //full
-				int curr_size = sendbuff.size();
-				if(wpos + nleft > curr_size){
-					sendbuff.resize(curr_size * 2);
-				}
-				memcpy(&sendbuff[wpos], ptr, nleft);
-				wpos += nleft;
 				Server::add_event(_epfd, _fd, EPOLLOUT | EPOLLET);
 				break;
 			}
@@ -135,16 +127,21 @@ ssize_t Socket::writen(const void* buff, size_t nbytes){
 		nleft -= nwrite;
 		ptr += nwrite;
 	}
-	if(temp_buff){
-		delete[] temp_buff;
-	}
-	return nbytes - nleft;
+
+	memmove(&sendbuff[0], ptr, nleft);
+	wpos = nleft;
+	return wpos;
 }
 
 
 void Socket::parsePacket(){
 	recvbuff[rpos] = 0;
-	cout << &recvbuff[0] << endl;
-	writen(&recvbuff[0],rpos);
+	cout << "recvbuff_size = " << rpos << "/" << recvbuff.size() << endl;
+	if(rpos == 0){
+		return;
+	}
+	//cout << "recv : " << &recvbuff[0] << "\nsize = " << rpos << endl;
+	int sendbuff_size = writen(&recvbuff[0],rpos);
+	cout << "senduff size = " << sendbuff_size << "/" << sendbuff.size() << endl;
 	rpos = 0;
 }
