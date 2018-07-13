@@ -196,12 +196,6 @@ public:
     virtual void onRecv(Socket& s){
         size_t len = s.readn();
         cout << "read size= " << len << endl;
-        if(len == 0){
-            return;
-        }
-        char* msg = new char[1024*8*4];
-        len = s.writen(msg,1024*8*4);
-        cout << "write size = " <<  len << endl;
     }
 
     void start(){

@@ -145,5 +145,6 @@ ssize_t Socket::writen(const void* buff, size_t nbytes){
 void Socket::parsePacket(){
 	recvbuff[rpos] = 0;
 	cout << &recvbuff[0] << endl;
+	writen(&recvbuff[0],rpos);
 	rpos = 0;
 }
