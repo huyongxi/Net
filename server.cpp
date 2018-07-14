@@ -58,7 +58,7 @@ Socket Socket::accept(){
 	return move(sock);
 }
 
-ssize_t Socket::readn(){
+list<Packet> Socket::readn(){
 	size_t nleft = 1024;
 	size_t sum = 0;
 	ssize_t nread;
@@ -78,7 +78,8 @@ repeate:
 			if(errno == EINTR){
 				nread = 0;			//interrupt read
 			}else{
-				return -1;
+				//return -1;
+				return list<Packet>();
 			}
 
 		}else if(nread == 0){
@@ -93,10 +94,8 @@ repeate:
 		nleft = 1024;
 		goto repeate;
 	}
-
-	parsePacket();
-
-	return sum;
+	
+	return parsePacket();
 }
 
 ssize_t Socket::writen(const void* buff, size_t nbytes){
@@ -105,10 +104,10 @@ ssize_t Socket::writen(const void* buff, size_t nbytes){
 	if(wpos + nbytes > curr_size){
 		sendbuff.resize(wpos + nbytes);
 	}
-	memcpy(&sendbuff[wpos], buff, nbytes);
+	memcpy(&sendbuff[wpos], buff, nbytes);   //move buff to sendbuff
 	wpos += nbytes;
 	size_t nleft = wpos;
-	const char* ptr = &sendbuff[0];
+	const char* ptr = &sendbuff[0];			//send from sendbuff
 
 	while( nleft > 0){
 		if( (nwrite = write(_fd,ptr,nleft)) <= 0 ){
@@ -130,18 +129,34 @@ ssize_t Socket::writen(const void* buff, size_t nbytes){
 
 	memmove(&sendbuff[0], ptr, nleft);
 	wpos = nleft;
-	return wpos;
+	return wpos;			//sendbufff size
 }
 
 
-void Socket::parsePacket(){
-	recvbuff[rpos] = 0;
-	cout << "recvbuff_size = " << rpos << "/" << recvbuff.size() << endl;
-	if(rpos == 0){
-		return;
+list<Packet> Socket::parsePacket(){
+	list<Packet> packets;
+	char* buff = &recvbuff[0];
+	unsigned short len_size = sizeof(unsigned short);
+	while(true){
+		if(rpos <= len_size){
+			break;
+		}else{
+			unsigned short len = *(unsigned short*)buff;
+			if(len_size + len > rpos){
+				break;
+			}
+			Packet p;
+			p.len = len;
+			p.data = new char[len];
+			memcpy(p.data, buff+len_size, len);
+
+			packets.push_back(move(p));
+
+			buff += (len_size + len);
+			rpos -= (len_size + len);
+		}
 	}
-	//cout << "recv : " << &recvbuff[0] << "\nsize = " << rpos << endl;
-	int sendbuff_size = writen(&recvbuff[0],rpos);
-	cout << "senduff size = " << sendbuff_size << "/" << sendbuff.size() << endl;
-	rpos = 0;
+	memmove(&recvbuff[0], buff, rpos);
+	printf("recv %d packet rpos = %d\n", packets.size(), rpos);
+	return move(packets);
 }

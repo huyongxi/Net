@@ -5,3 +5,7 @@ add_executable(Server
  server.cpp
  main.cpp
 )
+add_executable(testClient 
+ server.cpp
+ testClient.cpp
+)

@@ -33,6 +33,10 @@ const int EPOLLSIZE = 5000;
 const int sendBuffSize = 4*1024*8;
 const int recvBuffSize = 4*1024*8;
 using namespace std;
+
+
+
+
 typedef sockaddr SA;
 class SockAddr {
 public:
@@ -86,6 +90,25 @@ private:
 struct Packet {
     unsigned short len;
     char* data;
+
+    Packet():len(0),data(nullptr){}
+    Packet(Packet&& p){len = p.len; data = p.data; p.data = nullptr;}
+    Packet& operator=(Packet&& p){
+        if(this != &p){
+            len = p.len;
+            data = p.data;
+            p.data = nullptr;
+        }
+        return *this;
+    }
+    ~Packet(){
+        if(data){
+            delete[] data;
+        }
+    }
+    Packet(const Packet&) = delete;
+    Packet& operator=(const Packet&) = delete;
+
 };
 
 class Server;
@@ -140,8 +163,8 @@ public:
         return *this;
     }
 
-    void parsePacket();
-    ssize_t readn();
+    list<Packet> parsePacket();
+    list<Packet> readn();
     ssize_t writen(const void* buff, size_t nbytes);
 
     bool bind(const char* ip, unsigned short port);
@@ -167,8 +190,8 @@ public:
     }
 
 private:
-    int _fd = 0;
-    int _epfd = 0;
+    int _fd = -1;
+    int _epfd = -1;
     bool valid = false;
     SockAddr* addr = nullptr;
     int rpos = 0;
@@ -191,7 +214,7 @@ public:
     }
 
     virtual void onRecv(Socket& s){
-        size_t len = s.readn();
+        list<Packet> packets = s.readn();
     }
 
     void start(){
