@@ -215,6 +215,12 @@ public:
 
     virtual void onRecv(Socket& s){
         list<Packet> packets = s.readn();
+
+        for(auto& i : packets){
+            cout << "recv " << i.data << endl;
+            s.writen(&i.len, sizeof(i.len));
+            s.writen(i.data, i.len);
+        }
     }
 
     void start(){
